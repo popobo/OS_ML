@@ -18,13 +18,16 @@
 #define COMM_LEN 256
 #define PATH_BUF_LEN 512
 #define FILE_BUF_LEN 1024
+#define NODE_STR "-+-"
 
 typedef struct process_node {
     int pid;
     int ppid;
     char comm[COMM_LEN];
     struct process_node *next;
-    struct process_node *child; 
+    struct process_node *parent;
+    struct process_node *child;
+    struct process_node *next_child;
 } process_node;
 
 static process_node *head = NULL;
@@ -80,6 +83,8 @@ void append_node(int pid, int ppid, const char* comm) {
     strcpy(node->comm, comm);
     node->next = NULL;
     node->child = NULL;
+    node->next_child = NULL;
+    node->parent = NULL;
 
     if (head == NULL) {
         head = node;
@@ -89,18 +94,6 @@ void append_node(int pid, int ppid, const char* comm) {
 
     current->next = node;
     current = current->next;
-}
-
-void print_node() {
-    if (NULL == head) {
-        return;
-    }
-
-    process_node *temp = head;
-    while (temp != NULL) {
-        printf("pid:%d, ppid:%d, comm:%s\n", temp->pid, temp->ppid, temp->comm);
-        temp = temp->next;
-    }
 }
 
 void free_nodes() {
@@ -121,9 +114,9 @@ void free_nodes() {
     }
 }
 
-void read_stat(const char* pid_str) {
+void read_stat(const char* prefix, const char* pid_str) {
     char path_buf[PATH_BUF_LEN] = {};
-    snprintf(path_buf, PATH_BUF_LEN, "%s/%s/stat", PROC_PATH, pid_str);
+    snprintf(path_buf, PATH_BUF_LEN, "%s/%s/stat", prefix, pid_str);
 
     FILE *fd = fopen(path_buf, "r");
     assert(fd != NULL);
@@ -169,7 +162,112 @@ void read_task(const char* pid_str) {
         if (is_a_digit_path(task_dir_ent->d_name) == 0) {
             continue;
         }
-        // printf("task_dir_ent->d_name:%s\n", task_dir_ent->d_name);
+
+        read_stat(path_buf, pid_str);
+    }
+}
+
+void generate_nodes_tree() {
+    if (head == NULL) {
+        return;
+    }
+
+    process_node *target = head;
+    
+    while(target != NULL) {
+        process_node *target_current_child = NULL;
+        process_node *psb_child = head;
+        // printf("pid:%d, ppid:%d, comm:%s\n", target->pid, target->ppid, target->comm);
+        while (psb_child != NULL) {
+            if (psb_child->ppid != target->pid) {
+                psb_child = psb_child->next;
+                continue;
+            }
+
+            // printf("psb_child->pid:%d, psb_child->ppid:%d, psb_child->comm:%s\n", psb_child->pid, psb_child->ppid, psb_child->comm);
+
+            if (target->child == NULL) {
+                psb_child->parent = target;
+                target->child = psb_child;
+                target_current_child = target->child;
+            } else {
+                target_current_child->next_child = psb_child;
+                target_current_child = target_current_child->next_child;
+            }
+
+            psb_child = psb_child->next;
+        }
+
+        target = target->next;
+    }
+}
+
+void print_nodes() {
+    if (NULL == head) {
+        return;
+    }
+
+
+    process_node *temp = head;
+    while (temp != NULL) {
+        
+        temp = temp->next;
+    }
+}
+
+void filter_nodes() {
+    if (NULL == head) {
+        return;
+    }
+
+    process_node *target  = head;
+    while (target != NULL) {
+        process_node *temp = target;
+        process_node *temp_next = temp->next;
+        while (temp != NULL && temp_next != NULL) {
+            if (temp_next == target) {
+                temp = temp_next;
+                temp_next = temp->next;
+                continue;
+            }
+            
+            if (temp_next->pid == target->pid) {
+                temp->next = temp_next->next;
+                free(temp_next);
+                temp_next = temp->next;
+            } else {
+                temp = temp_next;
+                temp_next = temp->next;
+            }
+        }
+
+        target = target->next;
+    }
+
+    // filter pid=2,ppid=2
+    const int filter_id = 2;
+    process_node *temp = head;
+    while (temp != NULL) {
+        if (temp->pid != 2 && temp->ppid != 2) {
+            break;
+        }
+        
+        free(temp);
+        head = head->next;
+        temp = head;
+    }
+
+    process_node *temp_next = temp->next;
+    while (temp != NULL && temp_next != NULL) {
+        if (filter_id != temp_next->pid && filter_id != temp_next->ppid) {
+            temp = temp_next;
+            temp_next = temp->next;
+            continue;
+        }
+
+        temp->next = temp_next->next;
+        free(temp_next);
+        temp_next = temp->next;
     }
 }
 
@@ -194,12 +292,14 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        read_stat(dir_ent->d_name);
+        read_stat(PROC_PATH, dir_ent->d_name);
         
         read_task(dir_ent->d_name);
     }
 
-    print_node();
+    filter_nodes();
+    generate_nodes_tree();
+    print_nodes();
     free_nodes();
 
     assert(errno == 0);
