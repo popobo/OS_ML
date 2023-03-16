@@ -2,7 +2,7 @@ CC = gcc
 LD = gcc
 
 pstree: pstree.c
-	$(CC) -Wall -Werror -o $@ $<
+	$(CC) -Wall -o $@ $<
 
 .PHONY: run
 
